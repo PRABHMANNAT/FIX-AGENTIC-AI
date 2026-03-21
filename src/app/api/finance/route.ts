@@ -13,14 +13,14 @@ function currentPeriod() {
     .replace("/", "-");
 }
 
-export async function POST(request: Request) {
-  const startTime = Date.now();
-  const body = (await request.json()) as Record<string, unknown> & { userId?: string };
-  const supabase = await createServerSupabaseClient();
-  let userId = body.userId ?? DEMO_USER_ID;
-  let runId: string | null = null;
-
-  if (supabase) {
+export async function POST(request: Request): Promise<NextResponse | Response> {
+  try {
+const startTime = Date.now();
+const body = (await request.json()) as Record<string, unknown> & { userId?: string };
+const supabase = await createServerSupabaseClient();
+let userId = body.userId ?? DEMO_USER_ID;
+let runId: string | null = null;
+if (supabase) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -44,8 +44,7 @@ export async function POST(request: Request) {
 
     runId = data?.id ?? null;
   }
-
-  try {
+try {
     const analysis: FinanceAnalysis = isOpenAIConfigured
       ? await runFinanceAgent(body)
       : generateMockFinanceAnalysis(body);
@@ -127,5 +126,9 @@ export async function POST(request: Request) {
       { error: error instanceof Error ? error.message : "We couldn't check your numbers right now. Try again." },
       { status: 500 },
     );
+  }
+  } catch (error: any) {
+    console.error("API error:", error);
+    return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 });
   }
 }

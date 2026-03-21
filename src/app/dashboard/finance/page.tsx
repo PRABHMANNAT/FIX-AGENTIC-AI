@@ -1,333 +1,482 @@
 "use client";
-
-import { BarChart2, Loader2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { DEMO_USER_ID, demoBusinessMetrics, demoFinanceAnalysis } from "@/lib/demo-data";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Settings, AlertTriangle, X } from "lucide-react";
+import { useFinanceData } from "@/hooks/useFinanceData";
+import { useFinanceAgent } from "@/hooks/useFinanceAgent";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
-import { formatCurrency, formatNumber, formatSignedPercent } from "@/lib/utils";
-import type { BusinessMetric, FinanceAnalysis } from "@/types";
+import type { ArtifactType, FundraisingStage, FundraisingScore, CashFlowProjection, WeeklyBriefing, Invoice, ExpenseReport, RevenueData, PitchSlides } from "@/types/finance";
 
-function latestMetric(metrics: BusinessMetric[], type: BusinessMetric["metric_type"]) {
-  return metrics.find((metric) => metric.metric_type === type);
+// Artifact components
+import { FinanceHomeView } from "@/components/finance/FinanceHomeView";
+import { FinanceChatPanel, type FinanceChatPanelRef } from "@/components/finance/FinanceChatPanel";
+import { FinanceSettingsPanel } from "@/components/finance/FinanceSettingsPanel";
+import { InvoiceArtifact } from "@/components/finance/InvoiceArtifact";
+import { InvestorReportArtifact } from "@/components/finance/InvestorReportArtifact";
+import { PitchDeckArtifact } from "@/components/finance/PitchDeckArtifact";
+import { CashFlowArtifact } from "@/components/finance/CashFlowArtifact";
+import { BriefingArtifact } from "@/components/finance/BriefingArtifact";
+import { RevenueDashboard } from "@/components/finance/RevenueDashboard";
+import { BurnRunwayArtifact } from "@/components/finance/BurnRunwayArtifact";
+import { BurnInputModal } from "@/components/finance/BurnInputModal";
+import { ExpenseArtifact } from "@/components/finance/ExpenseArtifact";
+import { FundraisingArtifact } from "@/components/finance/FundraisingArtifact";
+import { AnomalyFeed } from "@/components/finance/AnomalyFeed";
+
+interface RecentDocument {
+  id: string;
+  type: string;
+  title: string;
+  created_at: string;
 }
 
-function metricChangeText(value: number | null | undefined) {
-  if (value === null || value === undefined) {
-    return "—";
-  }
-
-  return formatSignedPercent(value);
-}
-
-export default function FinancePage() {
+export default function FinanceSpacePage() {
   const [supabase] = useState(() => createBrowserSupabaseClient());
-  const [metrics, setMetrics] = useState<BusinessMetric[]>(demoBusinessMetrics);
-  const [result, setResult] = useState<FinanceAnalysis | null>(demoFinanceAnalysis);
-  const [loadingMetrics, setLoadingMetrics] = useState(true);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [form, setForm] = useState({
-    narrative: "",
-    mrr: "4280",
-    monthlyExpenses: "8200",
-    customerCount: "23",
-    avgPlanPrice: "186",
-  });
+  const [userId, setUserId] = useState("");
+  const financeData = useFinanceData();
 
+  // Artifact state
+  const [activeArtifactType, setActiveArtifactType] = useState<ArtifactType | null>(null);
+  const [activeArtifactData, setActiveArtifactData] = useState<unknown>(null);
+  const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
+  const [invoiceChangedFields] = useState<string[]>([]);
+  const [cashFlowGenerating, setCashFlowGenerating] = useState(false);
+  const [fundraisingScoring, setFundraisingScoring] = useState(false);
+  const [briefingGenerating, setBriefingGenerating] = useState(false);
+  const [burnModalOpen, setBurnModalOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [selectedFundraisingStage, setSelectedFundraisingStage] = useState<FundraisingStage>("seed");
+  const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([]);
+  const [mobileArtifactOpen, setMobileArtifactOpen] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
+
+  // Chat panel ref for imperative quick actions
+  const chatPanelRef = useRef<FinanceChatPanelRef>(null);
+
+  // Auth
   useEffect(() => {
-    let active = true;
-
-    const load = async () => {
-      setLoadingMetrics(true);
-
-      if (!supabase) {
-        setLoadingMetrics(false);
-        return;
-      }
-
-      const { data } = await supabase
-        .from("business_metrics")
-        .select("*")
-        .order("recorded_at", { ascending: false });
-
-      if (!active) {
-        return;
-      }
-
-      setMetrics(data?.length ? data : demoBusinessMetrics);
-      setLoadingMetrics(false);
-    };
-
-    void load();
-
-    return () => {
-      active = false;
-    };
+    if (!supabase) return;
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) setUserId(user.id);
+    });
   }, [supabase]);
 
-  const activeResult = result ?? demoFinanceAnalysis;
+  // Recent documents
+  useEffect(() => {
+    fetch("/api/finance/documents/recent")
+      .then((r) => r.json())
+      .then((data) => setRecentDocuments(data.documents || []))
+      .catch(() => {});
+  }, []);
 
-  const metricStrip = useMemo(() => {
-    if (!activeResult && metrics.length) {
-      return [
-        {
-          label: "Monthly Revenue",
-          value: `$${formatNumber(latestMetric(metrics, "mrr")?.value ?? 0)}`,
-          change: metricChangeText(latestMetric(metrics, "mrr")?.change_percent ?? 0),
-          tone: "var(--green)",
-        },
-      ];
-    }
+  // Artifact change handler
+  const handleArtifactChange = useCallback((type: ArtifactType, data: unknown, documentId?: string) => {
+    setActiveArtifactType(type);
+    setActiveArtifactData(data);
+    setActiveDocumentId(documentId || null);
+  }, []);
 
-    return [
-      {
-        label: "Monthly Revenue",
-        value: `$${formatNumber(activeResult.mrr)}`,
-        change: metricChangeText(activeResult.mrr_change),
-        tone: "var(--green)",
-      },
-      {
-        label: "ARR",
-        value: `$${formatNumber(activeResult.arr)}`,
-        change: metricChangeText(activeResult.mrr_change),
-        tone: "var(--text-1)",
-      },
-      {
-        label: "Monthly Churn",
-        value: `${activeResult.churn_rate}%`,
-        change: "-0.4%",
-        tone: "var(--ember)",
-      },
-      {
-        label: "LTV",
-        value: `$${formatNumber(activeResult.ltv)}`,
-        change: "—",
-        tone: "var(--text-1)",
-      },
-      {
-        label: "CAC",
-        value: `$${formatNumber(activeResult.cac)}`,
-        change: "—",
-        tone: "var(--text-1)",
-      },
-      {
-        label: "Days Of Runway",
-        value: `${activeResult.runway_days}`,
-        change: "cash left",
-        tone: activeResult.runway_days < 60 ? "var(--ember)" : "var(--green)",
-      },
-    ];
-  }, [activeResult, metrics]);
+  // Quick action from FinanceHomeView → send to chat
+  const handleQuickAction = useCallback((message: string) => {
+    chatPanelRef.current?.sendMessage(message);
+  }, []);
 
-  const analyze = async () => {
-    setIsAnalyzing(true);
+  // Render the right panel content based on artifact type
+  const renderArtifactPanel = () => {
+    switch (activeArtifactType) {
+      case "invoice":
+        return (
+          <InvoiceArtifact
+            invoice={activeArtifactData as Invoice}
+            documentId={activeDocumentId || ""}
+            isLoading={false}
+            changedFields={invoiceChangedFields}
+            onStatusChange={async (status: string) => {
+              try {
+                setPageError(null);
+                const res = await fetch("/api/finance/invoice/update", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ userId, documentId: activeDocumentId, status }),
+                });
+                if (!res.ok) throw new Error(await res.text() || "Failed to update invoice");
+                setActiveArtifactData((prev: unknown) => ({ ...(prev as Record<string, unknown>), status }));
+              } catch (err: any) {
+                setPageError(err.message || "Failed to complete action");
+              }
+            }}
+          />
+        );
 
-    try {
-      const response = await fetch("/api/finance", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          narrative: form.narrative,
-          mrr: Number(form.mrr),
-          monthlyExpenses: Number(form.monthlyExpenses),
-          customerCount: Number(form.customerCount),
-          avgPlanPrice: Number(form.avgPlanPrice),
-          userId: DEMO_USER_ID,
-        }),
-      });
+      case "investor_report":
+        return (
+          <InvestorReportArtifact
+            report={activeArtifactData as Record<string, unknown>}
+            documentId={activeDocumentId || ""}
+            month={(activeArtifactData as Record<string, unknown>)?.month as string}
+            year={(activeArtifactData as Record<string, unknown>)?.year as number}
+            onGeneratePitchDeck={async () => {
+              try {
+                setPageError(null);
+                const res = await fetch("/api/finance/investor-report/pitch-deck", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ userId, reportData: activeArtifactData }),
+                });
+                if (!res.ok) throw new Error(await res.text() || "Failed to generate pitch deck");
+                const result = await res.json();
+                handleArtifactChange("pitch_deck", { slides: result.slides, companyName: result.companyName }, result.documentId);
+              } catch (err: any) {
+                setPageError(err.message || "Failed to generate pitch deck");
+              }
+            }}
+          />
+        );
 
-      if (!response.ok) {
-        throw new Error("Finance analysis failed.");
-      }
+      case "pitch_deck":
+        return (
+          <PitchDeckArtifact
+            slides={(activeArtifactData as Record<string, unknown>)?.slides as unknown as PitchSlides}
+            documentId={activeDocumentId || ""}
+            companyName={financeData.settings?.company_name || "Your Company"}
+          />
+        );
 
-      const nextResult = (await response.json()) as FinanceAnalysis;
-      setResult(nextResult);
-    } finally {
-      setIsAnalyzing(false);
+      case "cash_flow":
+        return (
+          <CashFlowArtifact
+            projection={activeArtifactData as CashFlowProjection}
+            documentId={activeDocumentId || ""}
+            isLoading={cashFlowGenerating}
+            onRecalculate={async (assumptions: unknown) => {
+              setCashFlowGenerating(true);
+              setPageError(null);
+              try {
+                const res = await fetch("/api/finance/cashflow", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ userId, assumptions }),
+                });
+                if (!res.ok) throw new Error(await res.text() || "Failed to generate projection");
+                const result = await res.json();
+                handleArtifactChange("cash_flow", result.projection, result.documentId);
+              } catch (err: any) {
+                setPageError(err.message || "Failed to generate projection");
+              } finally {
+                setCashFlowGenerating(false);
+              }
+            }}
+          />
+        );
+
+      case "briefing":
+        return (
+          <BriefingArtifact
+            briefing={activeArtifactData as WeeklyBriefing}
+            allBriefings={financeData.briefings}
+            isLoading={false}
+            isGenerating={briefingGenerating}
+            onGenerate={async () => {
+              setBriefingGenerating(true);
+              setPageError(null);
+              try {
+                const res = await fetch("/api/finance/briefing/generate", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ userId }),
+                });
+                if (!res.ok) throw new Error(await res.text() || "Failed to generate briefing");
+                const result = await res.json();
+                handleArtifactChange("briefing", result.briefing, result.briefing?.id);
+              } catch (err: any) {
+                setPageError(err.message || "Failed to generate briefing");
+              } finally {
+                setBriefingGenerating(false);
+              }
+            }}
+            onSendToSlack={async () => {
+              try {
+                setPageError(null);
+                const res = await fetch("/api/finance/briefing/generate", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ userId, force: true }),
+                });
+                if (!res.ok) throw new Error(await res.text() || "Failed to send to Slack");
+              } catch (err: any) {
+                setPageError(err.message || "Failed to send to Slack");
+              }
+            }}
+          />
+        );
+
+      case "revenue_dashboard":
+        return (
+          <RevenueDashboard
+            data={financeData.stripeData as unknown as RevenueData}
+            isConnected={financeData.isConnected}
+            isLoading={financeData.isLoading}
+            onSyncNow={financeData.syncStripe}
+            onConnectStripe={financeData.connectStripe}
+          />
+        );
+
+      case "burn_runway":
+        return (
+          <BurnRunwayArtifact
+            burnData={financeData.burnData}
+            isLoading={financeData.isLoading}
+            onOpenInputModal={() => setBurnModalOpen(true)}
+            onUpdate={async (data: unknown) => {
+              try {
+                setPageError(null);
+                const res = await fetch("/api/finance/burn", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ userId, ...(data as Record<string, unknown>) }),
+                });
+                if (!res.ok) throw new Error(await res.text() || "Failed to update burn rate");
+                financeData.refresh();
+              } catch (err: any) {
+                setPageError(err.message || "Failed to update burn rate");
+              }
+            }}
+          />
+        );
+
+      case "expenses":
+        return (
+          <ExpenseArtifact
+            report={activeArtifactData as ExpenseReport}
+            isLoading={false}
+            onUploadCSV={async (file: File) => {
+              try {
+                setPageError(null);
+                const text = await file.text();
+                const lines = text.split("\n").filter((l) => l.trim());
+                if (lines.length < 2) throw new Error("File must have a header and at least one row");
+                const delimiter = lines[0].includes("\t") ? "\t" : ",";
+                const expenses = lines.slice(1).map((line) => {
+                  const parts = line.split(delimiter).map((p) => p.trim().replace(/(^"|"$)/g, ""));
+                  return { description: parts[0] || "", amount: parseFloat(parts[1]) || 0, date: parts[2] || new Date().toISOString().split("T")[0] };
+                }).filter((e) => e.description && e.amount > 0);
+                
+                if (!expenses.length) throw new Error("No valid expenses found in file");
+                
+                const res = await fetch("/api/finance/expenses/categorize", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ userId, expenses }),
+                });
+                if (!res.ok) throw new Error(await res.text() || "Failed to categorize expenses");
+                const result = await res.json();
+                if (result.summary) {
+                  handleArtifactChange("expenses", result.summary);
+                }
+              } catch (err: any) {
+                setPageError(err.message || "Failed to process CSV file");
+              }
+            }}
+            onRefresh={financeData.refresh}
+          />
+        );
+
+      case "fundraising":
+        return (
+          <FundraisingArtifact
+            score={activeArtifactData as FundraisingScore}
+            documentId={activeDocumentId}
+            isLoading={false}
+            isScoring={fundraisingScoring}
+            selectedStage={selectedFundraisingStage}
+            onStageChange={setSelectedFundraisingStage}
+            onRecalculate={async () => {
+              setFundraisingScoring(true);
+              setPageError(null);
+              try {
+                const res = await fetch("/api/finance/fundraising/score", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ userId, target_stage: selectedFundraisingStage }),
+                });
+                if (!res.ok) throw new Error(await res.text() || "Failed to score fundraising");
+                const result = await res.json();
+                handleArtifactChange("fundraising", result.score, result.documentId);
+              } catch (err: any) {
+                setPageError(err.message || "Failed to evaluate fundraising metrics");
+              } finally {
+                setFundraisingScoring(false);
+              }
+            }}
+          />
+        );
+
+      case "anomalies":
+        return (
+          <AnomalyFeed
+            anomalies={financeData.anomalies}
+            isLoading={financeData.isLoading}
+            onStatusChange={async (id: string, status: string) => {
+              try {
+                setPageError(null);
+                const res = await fetch("/api/finance/anomalies/list", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ id, status, userId }),
+                });
+                if (!res.ok) throw new Error(await res.text() || "Failed to update anomaly status");
+                financeData.refresh();
+              } catch (err: any) {
+                setPageError(err.message || "Failed to update status");
+              }
+            }}
+            onRefresh={async () => {
+              try {
+                setPageError(null);
+                const res = await fetch("/api/finance/anomalies/detect", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ userId }),
+                });
+                if (!res.ok) throw new Error(await res.text() || "Failed to run anomaly detection");
+                financeData.refresh();
+              } catch (err: any) {
+                setPageError(err.message || "Anomaly detection failed");
+              }
+            }}
+          />
+        );
+
+      default:
+        return (
+          <FinanceHomeView
+            onQuickAction={handleQuickAction}
+            recentDocuments={recentDocuments}
+            anomalies={financeData.anomalies}
+            stripeData={financeData.stripeData}
+            isConnected={financeData.isConnected}
+          />
+        );
     }
   };
 
   return (
-    <div className="page-shell">
-      <div className="page-topbar anim-fade-up">
-        <div>
-          <div className="page-kicker">Financial Overview</div>
-          <h1 className="page-title">My Revenue</h1>
-        </div>
-        <div className="font-comfortaa text-[13px] text-[var(--text-2)]">
-          Describe the business, enter your numbers, and let your office translate them into clear decisions.
-        </div>
+    <div style={{ display: "flex", height: "100vh", background: "#000", overflow: "hidden" }}>
+      {/* ── Middle Panel: Chat ── */}
+      <div
+        style={{
+          flex: "0 0 420px",
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
+          margin: "16px 0 16px 16px",
+          borderRadius: 16,
+          overflow: "hidden",
+          border: "1px solid rgba(255,255,255,0.06)",
+          background: "var(--background)",
+          position: "relative",
+        }}
+      >
+        {pageError && (
+          <div className="mx-4 mt-4 flex items-center justify-between rounded-lg bg-[rgba(239,68,68,0.1)] px-4 py-3 text-[13px] text-[var(--ember)] border border-[rgba(239,68,68,0.2)]">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={14} />
+              <span>{pageError}</span>
+            </div>
+            <button onClick={() => setPageError(null)} className="hover:opacity-70"><X size={14} /></button>
+          </div>
+        )}
+        <FinanceChatPanel
+          ref={chatPanelRef}
+          userId={userId}
+          onArtifactChange={handleArtifactChange}
+        />
       </div>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-        {metricStrip.map((metric, index) => (
-          <article
-            key={metric.label}
-            className="metric-card"
-            style={{ animationDelay: `${index * 0.08}s` }}
+      {/* ── Right Panel: Artifact ── */}
+      <div
+        className="hidden md:flex"
+        style={{
+          flex: 1,
+          flexDirection: "column",
+          minWidth: 0,
+          margin: "16px 16px 16px 0",
+          borderRadius: 16,
+          overflow: "hidden",
+          border: "1px solid rgba(255,255,255,0.06)",
+          background: "var(--surface)",
+          position: "relative",
+        }}
+      >
+        {/* Settings gear */}
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          className="absolute top-4 right-4 z-10 text-[var(--text-3)] hover:text-[var(--text-1)] transition-colors"
+          title="Finance Settings"
+        >
+          <Settings size={16} />
+        </button>
+        {renderArtifactPanel()}
+      </div>
+
+      {/* ── Mobile: Floating View Doc button ── */}
+      {activeArtifactType && (
+        <button
+          type="button"
+          onClick={() => setMobileArtifactOpen(true)}
+          className="md:hidden fixed bottom-4 right-4 z-30 rounded bg-[var(--violet)] px-4 py-2.5 text-[13px] font-mono text-white shadow-lg hover:brightness-110 transition-all"
+        >
+          View Document
+        </button>
+      )}
+
+      {/* ── Mobile: Full-screen overlay ── */}
+      {mobileArtifactOpen && (
+        <div className="md:hidden fixed inset-0 z-50 overflow-y-auto bg-[var(--background)]">
+          <button
+            type="button"
+            onClick={() => setMobileArtifactOpen(false)}
+            className="fixed top-4 left-4 z-50 text-[var(--text-1)] p-2"
           >
-            <div className="metric-label">{metric.label}</div>
-            <div className="metric-value">
-              {loadingMetrics ? <div className="shimmer-block h-[52px] w-[120px]" /> : metric.value}
-            </div>
-            <div className="metric-change" style={{ color: metric.tone }}>
-              {metric.change}
-            </div>
-          </article>
-        ))}
-      </section>
-
-      <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-        <div className="card anim-fade-up delay-2 p-6">
-          <div className="page-kicker">Money Input</div>
-          <div className="mt-3 font-comfortaa text-[14px] leading-[1.8] text-[var(--text-2)]">
-            Describe your current financial situation, or enter your numbers below.
-          </div>
-
-          <textarea
-            value={form.narrative}
-            onChange={(event) => setForm((current) => ({ ...current, narrative: event.target.value }))}
-            className="input-shell mt-5 min-h-[150px] resize-none"
-            placeholder="We make $4k/month, spend $2k, and have 45 customers paying $89 per month."
-          />
-
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <div className="field-stack !gap-2">
-              <label className="field-label">Monthly revenue</label>
-              <input
-                value={form.mrr}
-                onChange={(event) => setForm((current) => ({ ...current, mrr: event.target.value }))}
-                className="input-shell"
-              />
-            </div>
-            <div className="field-stack !gap-2">
-              <label className="field-label">Monthly expenses</label>
-              <input
-                value={form.monthlyExpenses}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, monthlyExpenses: event.target.value }))
-                }
-                className="input-shell"
-              />
-            </div>
-            <div className="field-stack !gap-2">
-              <label className="field-label">Customers</label>
-              <input
-                value={form.customerCount}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, customerCount: event.target.value }))
-                }
-                className="input-shell"
-              />
-            </div>
-            <div className="field-stack !gap-2">
-              <label className="field-label">Average price</label>
-              <input
-                value={form.avgPlanPrice}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, avgPlanPrice: event.target.value }))
-                }
-                className="input-shell"
-              />
-            </div>
-          </div>
-
-          <div className="mt-4 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-3)]">
-            Example: We make $4k/month, spend $2k, and have 45 customers at $89/month.
-          </div>
-
-          <button type="button" onClick={() => void analyze()} className="build-cta-button mt-6 !w-auto px-6">
-            {isAnalyzing ? (
-              <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
-            ) : (
-              <BarChart2 className="h-4 w-4" strokeWidth={2} />
-            )}
-            ANALYZE MY FINANCES →
+            ✕
           </button>
+          <div className="pt-12">{renderArtifactPanel()}</div>
         </div>
+      )}
 
-        <div className="space-y-6">
-          <section className="card forecast-grid anim-fade-up delay-3 p-6">
-            {[
-              {
-                label: "30 days",
-                value: activeResult.runway_forecast.days_30,
-                tone: activeResult.runway_forecast.days_30 > 90 ? "healthy" : "tight",
-              },
-              {
-                label: "60 days",
-                value: activeResult.runway_forecast.days_60,
-                tone: activeResult.runway_forecast.days_60 > 90 ? "healthy" : "tight",
-              },
-              {
-                label: "90 days",
-                value: activeResult.runway_forecast.days_90,
-                tone: activeResult.runway_forecast.days_90 > 90 ? "healthy" : "tight",
-              },
-            ].map((forecast) => (
-              <div
-                key={forecast.label}
-                className={`forecast-card ${forecast.tone === "healthy" ? "healthy" : "tight"}`}
-              >
-                <div className="metric-label">{forecast.label}</div>
-                <div className="mt-3 font-[var(--font-bebas)] text-[40px] uppercase leading-none text-[var(--text-1)]">
-                  {forecast.value}
-                </div>
-                <div className="mt-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-2)]">
-                  days remaining
-                </div>
-              </div>
-            ))}
-          </section>
+      {/* ── Modals ── */}
+      <BurnInputModal
+        isOpen={burnModalOpen}
+        onClose={() => setBurnModalOpen(false)}
+        onSave={async (data: Record<string, unknown>) => {
+          try {
+            setPageError(null);
+            const res = await fetch("/api/finance/burn", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId, ...data }),
+            });
+            if (!res.ok) throw new Error(await res.text() || "Failed to save burn data");
+            setBurnModalOpen(false);
+            financeData.refresh();
+          } catch (err: any) {
+            setPageError(err.message || "Failed to save burn metrics");
+            setBurnModalOpen(false); // Close modal, show error structurally
+          }
+        }}
+        initialData={financeData.burnData ?? undefined}
+      />
 
-          <section className="card anim-fade-up delay-4 p-6">
-            <div className="font-[var(--font-bebas)] text-[20px] uppercase tracking-[0.08em] text-[var(--text-1)]">
-              What This Means
-            </div>
-            <div className="mt-4 space-y-4">
-              {activeResult.insights.map((insight, index) => (
-                <div key={insight} className="flex gap-3">
-                  <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--green)]">
-                    0{index + 1}
-                  </span>
-                  <p className="font-comfortaa text-[14px] leading-[1.8] text-[var(--text-2)]">
-                    {insight}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="card anim-fade-up delay-5 p-6">
-            <div className="font-[var(--font-bebas)] text-[20px] uppercase tracking-[0.08em] text-[var(--text-1)]">
-              Alerts
-            </div>
-            <div className="mt-4 space-y-3">
-              {activeResult.alerts.length ? (
-                activeResult.alerts.map((alert) => (
-                  <div key={alert} className="alert-card">
-                    {alert}
-                  </div>
-                ))
-              ) : (
-                <div className="font-comfortaa text-[13px] leading-[1.7] text-[var(--text-2)]">
-                  No critical finance alerts right now.
-                </div>
-              )}
-            </div>
-
-            <div className="mt-5 rounded-[6px] border border-[var(--border)] bg-[var(--surface-hi)] p-4">
-              <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-3)]">
-                Burn rate
-              </div>
-              <div className="mt-2 font-[var(--font-bebas)] text-[32px] uppercase tracking-[0.05em] text-[var(--text-1)]">
-                {formatCurrency(activeResult.runway_forecast.burn_rate)}
-              </div>
-            </div>
-          </section>
-        </div>
-      </section>
+      <FinanceSettingsPanel
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onSave={async (settings: Record<string, unknown>) => {
+          await financeData.updateSettings(settings);
+          setSettingsOpen(false);
+        }}
+        initialSettings={financeData.settings}
+      />
     </div>
   );
 }
+

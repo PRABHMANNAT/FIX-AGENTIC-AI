@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   CircleDot,
   Command,
+  IndianRupee,
   LayoutGrid,
   LogOut,
   Rocket,
@@ -51,6 +52,12 @@ const NAV_ITEMS: Array<{
     label: "Revenue Intel",
     icon: Rocket,
     hex: "#22D3EE",
+  },
+  {
+    id: "finance" as DashboardArtifactView,
+    label: "Finance AI",
+    icon: IndianRupee,
+    hex: "#A78BFA",
   },
   {
     id: "warroom",
@@ -273,7 +280,13 @@ export default function IconSidebar({
               icon={item.icon}
               label={item.label}
               hex={item.hex}
-              onClick={() => onSwitch(item.id)}
+              onClick={() => {
+                if (item.id === ("finance" as DashboardArtifactView)) {
+                  router.push("/dashboard/finance");
+                } else {
+                  onSwitch(item.id);
+                }
+              }}
             />
           ))}
         </nav>
