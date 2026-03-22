@@ -171,7 +171,11 @@ When user asks about: pending decisions, unresolved questions,
 decision fatigue, what needs my input, or what is waiting on me:
 <artifact type='decision_queue'>
 { "requested": true }
-</artifact>`;
+</artifact>
+
+When generating an investor report or milestone update
+also offer: 'Want me to turn this into a LinkedIn post or thread?'
+This gives the founder a one-click path to share wins publicly.`;
 
     // 3. Add current artifact context
     if (currentArtifactType && currentArtifactData) {

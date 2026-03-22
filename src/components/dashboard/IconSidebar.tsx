@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import {
   CircleDot,
   Command,
-  IndianRupee,
+  DollarSign,
   LayoutGrid,
   LogOut,
+  Megaphone,
   Rocket,
   Settings,
   Shield,
@@ -56,8 +57,14 @@ const NAV_ITEMS: Array<{
   {
     id: "finance" as DashboardArtifactView,
     label: "Finance AI",
-    icon: IndianRupee,
+    icon: DollarSign,
     hex: "#A78BFA",
+  },
+  {
+    id: "social" as DashboardArtifactView,
+    label: "Social",
+    icon: Megaphone,
+    hex: "#F472B6",
   },
   {
     id: "warroom",
@@ -283,6 +290,8 @@ export default function IconSidebar({
               onClick={() => {
                 if (item.id === ("finance" as DashboardArtifactView)) {
                   router.push("/dashboard/finance");
+                } else if (item.id === ("social" as DashboardArtifactView)) {
+                  router.push("/social");
                 } else {
                   onSwitch(item.id);
                 }
