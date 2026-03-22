@@ -1,6 +1,7 @@
 "use client";
 
-import { FileText, TrendingUp, Flame, Newspaper, Target, BarChart3, AlertTriangle } from "lucide-react";
+import { useState, useEffect } from "react";
+import { FileText, TrendingUp, Flame, Newspaper, Target, BarChart3, AlertTriangle, MessageSquare, Clock, Activity, CheckCircle } from "lucide-react";
 import type { Anomaly } from "@/types/finance";
 import { cn } from "@/lib/utils";
 
@@ -49,6 +50,12 @@ const QUICK_ACTIONS = [
   { label: "Weekly Brief", sub: "This week's finance summary", prompt: "Generate my weekly finance briefing", icon: Newspaper, color: "var(--cyan)" },
   { label: "Raise Ready?", sub: "Score vs investor benchmarks", prompt: "Calculate my fundraising readiness score for seed stage", icon: Target, color: "var(--pink)" },
   { label: "Cash Flow", sub: "6-month projection", prompt: "Generate a 6-month cash flow projection", icon: BarChart3, color: "var(--text-1)" },
+  { label: "Team Pulse", sub: "Slack patterns and blockers", prompt: "Show me my team communication insights from Slack", icon: MessageSquare, color: "var(--violet)" },
+  { label: "Time Audit", sub: "Where your hours really went", prompt: "Show me my time audit for this week", icon: Clock, color: "var(--cyan)" },
+  { label: "Set Priorities", sub: "Align your quarter", prompt: "Help me set my Q2 priorities and goals", icon: Target, color: "var(--amber)" },
+  { label: "Business Health", sub: "Cross-signal intelligence analysis", prompt: "Run a full business intelligence analysis across all my data sources", icon: Activity, color: "var(--violet)" },
+  { label: "GitHub Velocity", sub: "Shipping pace and PR health", prompt: "Show me my GitHub engineering velocity", icon: BarChart3, color: "var(--cyan)" },
+  { label: "Decision Queue", sub: "Unresolved items needing your attention", prompt: "What decisions are waiting for my input?", icon: CheckCircle, color: "var(--green)" },
 ];
 
 const TYPE_COLORS: Record<string, string> = {
@@ -61,6 +68,14 @@ const TYPE_COLORS: Record<string, string> = {
 
 export function FinanceHomeView({ onQuickAction, recentDocuments, anomalies, stripeData, isConnected }: FinanceHomeViewProps) {
   const newAnomalies = anomalies.filter((a) => a.status === "new");
+  const [summary, setSummary] = useState<any>(null);
+
+  useEffect(() => {
+    fetch('/api/intelligence/summary')
+      .then(r => r.json())
+      .then(setSummary)
+      .catch(() => {});
+  }, []);
 
   return (
     <div className="flex flex-col gap-8 p-6 overflow-y-auto h-full">
@@ -103,6 +118,39 @@ export function FinanceHomeView({ onQuickAction, recentDocuments, anomalies, str
         ) : (
           <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-hi)] p-4 text-center">
             <p className="font-mono text-[12px] text-[var(--text-3)]">Connect Stripe to see live metrics</p>
+          </div>
+        )}
+
+        {/* Intelligence summary */}
+        {summary && (
+          <div className="space-y-2 mt-3">
+            {summary.latest_health_score !== null && summary.latest_health_score !== undefined && (
+              <div className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--surface-hi)] px-4 py-2.5">
+                <span className="font-mono text-[10px] text-[var(--text-3)]">Business health</span>
+                <span
+                  className="font-mono text-[13px] font-bold"
+                  style={{ color: summary.latest_health_score >= 70 ? 'var(--green)' : summary.latest_health_score >= 50 ? 'var(--amber)' : 'var(--ember)' }}
+                >
+                  {summary.latest_health_score}/100
+                </span>
+              </div>
+            )}
+            {(summary.proactive_alerts_count || 0) > 0 && (
+              <div className="flex items-center gap-2 px-1">
+                <AlertTriangle size={11} className="text-[var(--ember)]" />
+                <span className="font-mono text-[10px] text-[var(--ember)]">
+                  {summary.proactive_alerts_count} alert{summary.proactive_alerts_count !== 1 ? 's' : ''} need attention
+                </span>
+              </div>
+            )}
+            {summary.latest_one_priority && (
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-hi)] px-4 py-2.5">
+                <div className="font-mono text-[9px] uppercase tracking-widest text-[var(--text-3)] mb-1">Today&#39;s priority</div>
+                <div className="text-[11px] text-[var(--text-2)] line-clamp-2">
+                  {summary.latest_one_priority.length > 80 ? summary.latest_one_priority.substring(0, 80) + '…' : summary.latest_one_priority}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

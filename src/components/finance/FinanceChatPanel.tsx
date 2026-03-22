@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 export interface FinanceChatPanelProps {
   userId: string;
   onArtifactChange: (type: ArtifactType, data: unknown) => void;
+  onTriggerHubAnalysis?: () => void;
 }
 
 const QUICK_ACTIONS = [
@@ -23,7 +24,7 @@ export interface FinanceChatPanelRef {
 }
 
 export const FinanceChatPanel = forwardRef<FinanceChatPanelRef, FinanceChatPanelProps>(
-  ({ userId, onArtifactChange }, ref) => {
+  ({ userId, onArtifactChange, onTriggerHubAnalysis }, ref) => {
   const {
     messages,
     isLoading,
@@ -31,11 +32,15 @@ export const FinanceChatPanel = forwardRef<FinanceChatPanelRef, FinanceChatPanel
     streamingContent,
     sendMessage,
     clearMessages,
-  } = useFinanceAgent(userId);
+  } = useFinanceAgent(userId, onTriggerHubAnalysis);
 
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const [proactiveAlerts, setProactiveAlerts] = useState<any[]>([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [alertsInjected, setAlertsInjected] = useState(false)
 
   useImperativeHandle(ref, () => ({
     sendMessage: (content: string) => {
@@ -43,12 +48,65 @@ export const FinanceChatPanel = forwardRef<FinanceChatPanelRef, FinanceChatPanel
     },
   }));
 
+  // Fetch proactive alerts every 2 minutes
+  useEffect(() => {
+    const fetchAlerts = async () => {
+      try {
+        const res = await fetch('/api/finance/proactive/alerts')
+        if (!res.ok) return
+        const data = await res.json()
+        setProactiveAlerts(data.alerts || [])
+        setUnreadCount(data.unread_count || 0)
+      } catch (e) {
+        // silent fail — never break the chat
+      }
+    }
+
+    fetchAlerts()
+    const interval = setInterval(fetchAlerts, 120000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Inject unread alerts as assistant messages when chat is fresh
+  useEffect(() => {
+    if (alertsInjected) return
+    if (proactiveAlerts.length === 0) return
+    if (messages.length > 0) return
+
+    const alertMessages = proactiveAlerts.map((alert) => ({
+      id: 'alert-' + alert.id,
+      role: 'assistant' as const,
+      content: `${alert.message}\n\nSuggested action: ${alert.suggested_action}`,
+      timestamp: alert.created_at || new Date().toISOString(),
+    }))
+
+    // We need access to setMessages from useFinanceAgent — inject directly via sendMessage workaround
+    // Since we can't directly setMessages, we push them one by one via the messages array manipulation
+    // Instead: use React state trick — store injected alerts separately and render them before regular messages
+    // For simplicity, use sendMessage for first alert only — but that would trigger AI. 
+    // Better: append to messages array through the hook's exposed interface is not available.
+    // We rely on rendering injected alerts from proactiveAlerts state directly in the messages area.
+    // Mark as injected so we only do this once, and mark all as read.
+    setAlertsInjected(true)
+
+    // Mark all as read
+    proactiveAlerts.forEach((alert) => {
+      fetch('/api/finance/proactive/alerts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: alert.id, status: 'read', userId }),
+      }).catch(() => {})
+    })
+
+    setUnreadCount(0)
+  }, [proactiveAlerts, messages, alertsInjected, userId])
+
   // Auto-scroll logic
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, streamingContent, isLoading]);
+  }, [messages, streamingContent, isLoading, proactiveAlerts]);
 
   // Auto-resize textarea
   const autoResize = () => {
@@ -97,6 +155,24 @@ export const FinanceChatPanel = forwardRef<FinanceChatPanelRef, FinanceChatPanel
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
               <span className="font-mono text-[9px] uppercase tracking-wider text-emerald-500">Online</span>
             </div>
+            {unreadCount > 0 && (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '18px',
+                  height: '18px',
+                  borderRadius: '50%',
+                  fontSize: '11px',
+                  fontWeight: '600',
+                  marginLeft: '6px',
+                }}
+                className="bg-red-500 text-white"
+              >
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
           </div>
         </div>
         {messages.length > 0 && (
@@ -113,7 +189,20 @@ export const FinanceChatPanel = forwardRef<FinanceChatPanelRef, FinanceChatPanel
 
       {/* ── MESSAGES RUNTIME ── */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6 pb-32">
-        {messages.length === 0 ? (
+        {messages.length === 0 && alertsInjected && proactiveAlerts.length > 0 ? (
+          <div className="space-y-6">
+            {proactiveAlerts.map((alert) => (
+              <div key={'alert-' + alert.id} className="flex justify-start animate-slide-up">
+                <div className="max-w-[85%] space-y-3 px-4 py-3 text-[14px] leading-relaxed rounded-2xl rounded-tl-sm bg-transparent border-l-2 border-l-[var(--violet)] pl-5 text-[var(--text-2)]">
+                  <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--violet)] mb-1">
+                    Finance Agent · Alert
+                  </div>
+                  <div className="whitespace-pre-wrap">{alert.message}{alert.suggested_action ? `\n\nSuggested action: ${alert.suggested_action}` : ''}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : messages.length === 0 ? (
           <div className="flex h-full flex-col justify-center items-center text-center">
             <div className="panel flex flex-col justify-center items-center p-8 max-w-sm">
               <h3 className="font-display text-[18px] text-[var(--text-1)] mb-2">Ask me anything about your finances.</h3>

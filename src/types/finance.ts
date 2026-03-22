@@ -62,7 +62,14 @@ export type ArtifactType =
   | 'fundraising'
   | 'revenue_dashboard'
   | 'burn_runway'
-  | 'anomalies';
+  | 'anomalies'
+  | 'slack_insights'
+  | 'time_audit'
+  | 'goal_setter'
+  | 'workflow_hub'
+  | 'github_velocity'
+  | 'decision_queue';
+
 
 export interface ChatMessage {
   id: string;

@@ -219,7 +219,7 @@ export function InvoiceArtifact({
   }
 
   // ── Render ────────────────────────────────────────────────────────────
-  const statusStyle = STATUS_STYLES[invoice.status];
+  const statusStyle = STATUS_STYLES[invoice.status] ?? STATUS_STYLES.draft;
 
   return (
     <div className="panel flex flex-col gap-0 overflow-hidden anim-fade-in">

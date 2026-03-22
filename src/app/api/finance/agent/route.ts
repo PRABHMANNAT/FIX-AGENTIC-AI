@@ -119,7 +119,59 @@ For fundraising return: { overall_score, grade, stage_readiness, metrics, top_st
 
 When the user asks analysis questions answer conversationally using the real numbers from the financial context above.
 When editing an existing document always return the complete updated document JSON — never partial updates.
-Be direct and concise. Think like a senior CFO. Use ₹ for amounts.`;
+Be direct and concise. Think like a senior CFO. Use ₹ for amounts.
+
+You also have access to Slack workflow data when it is connected.
+When the user asks about: team, communication, blockers, workflow,
+response times, or anything about how the team is working —
+fetch and reference Slack insights.
+
+When Slack is not connected and the user asks about team topics:
+suggest they connect Slack in Finance Settings to unlock team
+communication intelligence.
+
+To show Slack insights in the artifact panel, return:
+<artifact type='slack_insights'>
+{ "requested": true }
+</artifact>
+This will trigger the SlackInsights component in the right panel.
+
+When the user asks about: time, calendar, focus, deep work, meetings,
+priorities, goals, quarterly planning, or how they spend their time —
+return this artifact to show the time audit:
+<artifact type='time_audit'>
+{ "requested": true }
+</artifact>
+
+When the user asks to set goals, priorities, or quarterly planning:
+<artifact type='goal_setter'>
+{ "requested": true }
+</artifact>
+
+When Slack or Calendar are not connected and user asks about
+team or time topics: suggest connecting in Finance Settings.
+
+When the user asks for a business health check, full analysis,
+workflow intelligence, what is blocking them, or cross-signal analysis:
+<artifact type='workflow_hub'>
+{ "requested": true }
+</artifact>
+
+When showing this artifact also trigger the analysis automatically
+by noting in your text response: 'Running cross-signal analysis now...'
+This signals to the frontend to call runHubAnalysis.
+
+When user asks about: GitHub, shipping, commits, PRs, engineering,
+code velocity, or deployment:
+<artifact type='github_velocity'>
+{ "requested": true }
+</artifact>
+
+When user asks about: pending decisions, unresolved questions,
+decision fatigue, what needs my input, or what is waiting on me:
+<artifact type='decision_queue'>
+{ "requested": true }
+</artifact>`;
 
     // 3. Add current artifact context
     if (currentArtifactType && currentArtifactData) {
@@ -170,12 +222,18 @@ If the user asks to edit or update it, modify that document and return the updat
                   console.error("Failed to parse JSON inside <artifact> tags:", err);
                 }
               }
+              // Trigger hub analysis if agent requested it
+              if (fullResponse.includes('Running cross-signal analysis now')) {
+                controller.enqueue(encoder.encode(`data: {"type":"trigger_hub_analysis"}\n\n`));
+              }
             }
           });
         } catch (error: any) {
           console.error("Stream error:", error);
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", message: error.message })}\n\n`));
         } finally {
+          // Check if we need to trigger hub analysis
+          // (done by checking the fullResponse accumulated in onComplete closure)
           controller.enqueue(encoder.encode(`data: {"type":"done"}\n\n`));
           controller.close();
         }

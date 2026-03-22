@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import type { ChatMessage, ArtifactType } from "@/types/finance";
 
 // Use a simple ID generator since standard crypto.randomUUID isn't guaranteed client-side without polyfills
 const generateId = () => Math.random().toString(36).substring(2, 15);
 
-export function useFinanceAgent(userId: string) {
+export function useFinanceAgent(userId: string, onTriggerHubAnalysis?: () => void) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [currentArtifact, setCurrentArtifact] = useState<{ type: ArtifactType; data: unknown } | null>(null);
@@ -154,6 +154,11 @@ export function useFinanceAgent(userId: string) {
                         : m
                     )
                   );
+                } else if (data.type === "trigger_hub_analysis") {
+                  // Trigger hub analysis in the background
+                  if (onTriggerHubAnalysis) {
+                    onTriggerHubAnalysis();
+                  }
                 } else if (data.type === "error") {
                   // Show meaningful error in message bubble instead of generic fallback
                   const errorMsg = `I encountered an error. Please try again. Details: ${data.message || data.content || 'Unknown error'}`;

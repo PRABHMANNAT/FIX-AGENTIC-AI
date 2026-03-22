@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { X, Upload, Loader2, Check, AlertTriangle, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -9,9 +9,10 @@ interface FinanceSettingsPanelProps {
   onClose: () => void;
   onSave: (settings: Record<string, unknown>) => void;
   initialSettings: Record<string, unknown> | null;
+  userId?: string;
 }
 
-export function FinanceSettingsPanel({ isOpen, onClose, onSave, initialSettings }: FinanceSettingsPanelProps) {
+export function FinanceSettingsPanel({ isOpen, onClose, onSave, initialSettings, userId }: FinanceSettingsPanelProps) {
   const [form, setForm] = useState({
     company_name: (initialSettings?.company_name as string) || "",
     company_address: (initialSettings?.company_address as string) || "",
@@ -25,9 +26,31 @@ export function FinanceSettingsPanel({ isOpen, onClose, onSave, initialSettings 
   const [slackStatus, setSlackStatus] = useState<"idle" | "sent" | "failed">("idle");
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [slackConnected, setSlackConnected] = useState(false);
+  const [slackWorkspace, setSlackWorkspace] = useState('');
+  const [calendarConnected, setCalendarConnected] = useState(false);
+  const [githubConnected, setGithubConnected] = useState(false);
 
   const updateField = useCallback((field: string, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/integrations/slack/insights')
+      .then(r => r.json())
+      .then(data => {
+        setSlackConnected(data.connected || false)
+        setSlackWorkspace(data.workspace_name || '')
+      })
+      .catch(() => {})
+    fetch('/api/integrations/calendar/insights')
+      .then(r => r.json())
+      .then(data => setCalendarConnected(data.connected || false))
+      .catch(() => {})
+    fetch('/api/integrations/github/insights')
+      .then(r => r.json())
+      .then(data => setGithubConnected(data.connected || false))
+      .catch(() => {})
   }, []);
 
   const handleLogoUpload = async (file: File) => {
@@ -184,11 +207,70 @@ export function FinanceSettingsPanel({ isOpen, onClose, onSave, initialSettings 
               )}
             </div>
 
-            {/* Slack */}
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-hi)] p-4 space-y-3">
+            {/* Slack — OAuth workspace connection */}
+            <div className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--surface-hi)] p-4">
               <div>
                 <div className="font-display text-[13px] text-[var(--text-1)]">Slack</div>
-                <div className="font-mono text-[10px] text-[var(--text-3)]">Weekly briefing delivery</div>
+                <div className="font-mono text-[10px] text-[var(--text-3)]">
+                  {slackConnected && slackWorkspace ? slackWorkspace : 'Team communication insights'}
+                </div>
+              </div>
+              {slackConnected ? (
+                <span className="rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-widest bg-[rgba(16,185,129,0.1)] border border-[rgba(16,185,129,0.2)] text-emerald-500">Connected</span>
+              ) : (
+                <a
+                  href={`/api/integrations/slack/connect?userId=${userId || ''}`}
+                  className="flex items-center gap-1.5 rounded bg-[var(--violet)] px-3 py-1.5 text-[11px] font-mono text-white hover:brightness-110 transition-all"
+                >
+                  Connect <ExternalLink size={10} />
+                </a>
+              )}
+            </div>
+
+            {/* Google Calendar */}
+            <div className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--surface-hi)] p-4">
+              <div>
+                <div className="font-display text-[13px] text-[var(--text-1)]">Google Calendar</div>
+                <div className="font-mono text-[10px] text-[var(--text-3)]">Time audit and focus tracking</div>
+              </div>
+              {calendarConnected ? (
+                <span className="rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-widest bg-[rgba(16,185,129,0.1)] border border-[rgba(16,185,129,0.2)] text-emerald-500">Connected</span>
+              ) : (
+                <a
+                  href={`/api/integrations/calendar/connect?userId=${userId || ''}`}
+                  className="flex items-center gap-1.5 rounded bg-[var(--violet)] px-3 py-1.5 text-[11px] font-mono text-white hover:brightness-110 transition-all"
+                >
+                  Connect <ExternalLink size={10} />
+                </a>
+              )}
+            </div>
+
+            {/* GitHub */}
+            <div className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--surface-hi)] p-4">
+              <div>
+                <div className="font-display text-[13px] text-[var(--text-1)]">GitHub</div>
+                <div className="font-mono text-[10px] text-[var(--text-3)]">Engineering velocity and PR tracking</div>
+              </div>
+              {githubConnected ? (
+                <span className="rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-widest bg-[rgba(16,185,129,0.1)] border border-[rgba(16,185,129,0.2)] text-emerald-500">Connected</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() =>
+                    window.location.href = `/api/integrations/github/connect?userId=${userId || ''}`
+                  }
+                  className="flex items-center gap-1.5 rounded bg-[var(--violet)] px-3 py-1.5 text-[11px] font-mono text-white hover:brightness-110 transition-all"
+                >
+                  Connect GitHub
+                </button>
+              )}
+            </div>
+
+            {/* Slack — Webhook for alert delivery */}
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-hi)] p-4 space-y-3">
+              <div>
+                <div className="font-display text-[13px] text-[var(--text-1)]">Slack Alerts</div>
+                <div className="font-mono text-[10px] text-[var(--text-3)]">Webhook for high-urgency alert delivery</div>
               </div>
               <div className="flex gap-2">
                 <input

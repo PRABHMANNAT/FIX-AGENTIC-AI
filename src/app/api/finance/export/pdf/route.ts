@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUserContext, createAdminClient } from "@/lib/supabase";
-// @ts-expect-error – html-pdf-node has no official @types package
-import htmlPdf from "html-pdf-node";
+
+// Force Node.js runtime — html-pdf-node uses puppeteer which requires Node APIs
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 
 const BUCKET = "finance-exports";
 const SIGNED_URL_TTL = 3600; // 1 hour
@@ -131,6 +134,9 @@ const options = {
   };
 let pdfBuffer: Buffer;
 try {
+    // Dynamic require keeps html-pdf-node out of the webpack bundle
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const htmlPdf = require("html-pdf-node");
     pdfBuffer = await htmlPdf.generatePdf(file, options) as Buffer;
   } catch (e) {
     const msg = e instanceof Error ? e.message : "PDF generation failed.";

@@ -207,8 +207,8 @@ export function FundraisingArtifact({
         <div>
           <h3 className="font-mono text-[10px] uppercase tracking-widest text-[var(--text-3)] mb-4">How you compare</h3>
           <div className="space-y-1">
-            {score.metrics.map((m, i) => {
-              const style = STATUS_STYLES[m.status];
+            {(score.metrics || []).map((m, i) => {
+              const style = STATUS_STYLES[m.status] || STATUS_STYLES.gap;
               const isLowerBetter = LOWER_IS_BETTER.includes(m.name);
               return (
                 <div key={i} className="rounded-lg border border-[var(--border)] bg-[var(--surface-hi)] p-4">
@@ -241,7 +241,7 @@ export function FundraisingArtifact({
           <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-hi)] p-5">
             <h4 className="font-mono text-[10px] uppercase tracking-widest text-[var(--green)] mb-3">What&apos;s working</h4>
             <ul className="space-y-2">
-              {score.top_strengths.map((s, i) => (
+              {(score.top_strengths || []).map((s, i) => (
                 <li key={i} className="flex gap-2 text-[13px] text-[var(--text-2)] leading-relaxed">
                   <span className="text-[var(--green)] mt-0.5 shrink-0">✓</span><span>{s}</span>
                 </li>
@@ -251,7 +251,7 @@ export function FundraisingArtifact({
           <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-hi)] p-5">
             <h4 className="font-mono text-[10px] uppercase tracking-widest text-[var(--ember)] mb-3">Critical gaps</h4>
             <ul className="space-y-2">
-              {score.critical_gaps.map((g, i) => (
+              {(score.critical_gaps || []).map((g, i) => (
                 <li key={i} className="flex gap-2 text-[13px] text-[var(--text-2)] leading-relaxed">
                   <span className="text-[var(--ember)] mt-0.5 shrink-0">✗</span><span>{g}</span>
                 </li>
@@ -270,7 +270,7 @@ export function FundraisingArtifact({
         <div>
           <h3 className="font-mono text-[10px] uppercase tracking-widest text-[var(--text-3)] mb-4">Lead with these in investor meetings</h3>
           <div className="space-y-3">
-            {score.investor_talking_points.map((point, i) => (
+            {(score.investor_talking_points || []).map((point, i) => (
               <div key={i} className="flex items-start justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-hi)] p-4">
                 <p className="text-[13px] text-[var(--text-1)] leading-relaxed flex-1">{point}</p>
                 <button

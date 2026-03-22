@@ -232,8 +232,8 @@ export function BriefingArtifact({
                     : "text-[var(--text-1)]"
                 )}
               >
-                {activeBriefing.revenue_update.change_percent > 0 ? "+" : ""}
-                {activeBriefing.revenue_update.change_percent.toFixed(1)}%
+                {(activeBriefing.revenue_update.change_percent ?? 0) > 0 ? "+" : ""}
+                {(activeBriefing.revenue_update.change_percent ?? 0).toFixed(1)}%
               </span>
             </div>
             <p className="text-[12px] text-[var(--text-2)] leading-relaxed">{activeBriefing.revenue_update.insight}</p>
@@ -254,8 +254,8 @@ export function BriefingArtifact({
                     : "text-[var(--text-1)]"
                 )}
               >
-                {activeBriefing.burn_update.change_percent > 0 ? "+" : ""}
-                {activeBriefing.burn_update.change_percent.toFixed(1)}%
+                {(activeBriefing.burn_update.change_percent ?? 0) > 0 ? "+" : ""}
+                {(activeBriefing.burn_update.change_percent ?? 0).toFixed(1)}%
               </span>
             </div>
             <p className="text-[12px] text-[var(--text-2)] leading-relaxed">{activeBriefing.burn_update.insight}</p>

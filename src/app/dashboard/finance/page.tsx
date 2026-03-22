@@ -21,6 +21,13 @@ import { BurnInputModal } from "@/components/finance/BurnInputModal";
 import { ExpenseArtifact } from "@/components/finance/ExpenseArtifact";
 import { FundraisingArtifact } from "@/components/finance/FundraisingArtifact";
 import { AnomalyFeed } from "@/components/finance/AnomalyFeed";
+import { SlackInsights } from "@/components/integrations/SlackInsights";
+import { TimeAudit } from "@/components/integrations/TimeAudit";
+import { GoalSetter } from "@/components/integrations/GoalSetter";
+import { WorkflowHub } from "@/components/intelligence/WorkflowHub";
+import { GitHubVelocity } from "@/components/integrations/GitHubVelocity";
+import { DecisionQueue } from "@/components/intelligence/DecisionQueue";
+import { ProactiveAlertBell } from "@/components/intelligence/ProactiveAlertBell";
 
 interface RecentDocument {
   id: string;
@@ -48,6 +55,79 @@ export default function FinanceSpacePage() {
   const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([]);
   const [mobileArtifactOpen, setMobileArtifactOpen] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
+
+  // Slack state
+  const [slackData, setSlackData] = useState<{
+    insights: any[];
+    unanswered_count: number;
+    last_synced: string | null;
+    connected: boolean;
+  }>({ insights: [], unanswered_count: 0, last_synced: null, connected: false });
+  const [slackSyncing, setSlackSyncing] = useState(false);
+
+  // Calendar/time-audit state
+  const [calendarData, setCalendarData] = useState<any>(null);
+  const [calendarSyncing, setCalendarSyncing] = useState(false);
+
+  // Goals state
+  const [goalsData, setGoalsData] = useState<any[]>([]);
+  const [goalsSaving, setGoalsSaving] = useState(false);
+
+  function getCurrentQuarter(): string {
+    const now = new Date();
+    const q = Math.ceil((now.getMonth() + 1) / 3);
+    return `Q${q} ${now.getFullYear()}`;
+  }
+
+  const fetchCalendarData = useCallback(async () => {
+    try {
+      const res = await fetch('/api/integrations/calendar/insights');
+      if (!res.ok) return;
+      const data = await res.json();
+      setCalendarData(data);
+    } catch {}
+  }, []);
+
+  const fetchGoals = useCallback(async () => {
+    try {
+      const res = await fetch('/api/goals');
+      if (!res.ok) return;
+      const data = await res.json();
+      setGoalsData(data.goals || []);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    fetchCalendarData();
+    fetchGoals();
+  }, [fetchCalendarData, fetchGoals]);
+
+  // Hub analysis state
+  const [hubAnalysis, setHubAnalysis] = useState<any>(null);
+  const [hubDataSources, setHubDataSources] = useState({
+    finance: true, slack: false, calendar: false, github: false,
+  });
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [lastAnalyzed, setLastAnalyzed] = useState<string | null>(null);
+
+
+  const fetchSlackData = useCallback(async () => {
+    try {
+      const res = await fetch('/api/integrations/slack/insights');
+      if (!res.ok) return;
+      const data = await res.json();
+      setSlackData({
+        insights: data.insights || [],
+        unanswered_count: data.unanswered_count || 0,
+        last_synced: data.last_synced || null,
+        connected: data.connected || false,
+      });
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    fetchSlackData();
+  }, [fetchSlackData]);
 
   // Chat panel ref for imperative quick actions
   const chatPanelRef = useRef<FinanceChatPanelRef>(null);
@@ -79,6 +159,104 @@ export default function FinanceSpacePage() {
   const handleQuickAction = useCallback((message: string) => {
     chatPanelRef.current?.sendMessage(message);
   }, []);
+
+  // Hub analysis runner (placed after handleArtifactChange)
+  const runHubAnalysis = useCallback(async () => {
+    if (!userId) return;
+    setIsAnalyzing(true);
+    try {
+      const res = await fetch('/api/intelligence/hub', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      });
+      const data = await res.json();
+      setHubAnalysis(data.analysis);
+      setHubDataSources(data.data_sources_used);
+      setLastAnalyzed(data.generated_at);
+      handleArtifactChange('workflow_hub', data.analysis, undefined);
+    } catch (e) {
+      console.error('Hub analysis failed:', e);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }, [userId, handleArtifactChange]);
+
+  // Decision queue state
+  const [decisions, setDecisions] = useState<any[]>([]);
+  const [decisionsTotal, setDecisionsTotal] = useState(0);
+  const [isScanning, setIsScanning] = useState(false);
+  const [resolvedDecisions, setResolvedDecisions] = useState<string[]>([]);
+
+  const scanDecisions = useCallback(async () => {
+    if (!userId) return;
+    setIsScanning(true);
+    try {
+      const res = await fetch('/api/intelligence/decisions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      });
+      const data = await res.json();
+      setDecisions(data.decisions || []);
+      setDecisionsTotal(data.total || 0);
+      handleArtifactChange('decision_queue', data, undefined);
+    } catch (e) {
+      console.error('Decision scan failed:', e);
+    } finally {
+      setIsScanning(false);
+    }
+  }, [userId, handleArtifactChange]);
+
+  const resolveDecision = useCallback((sourceId: string) => {
+    setResolvedDecisions(prev => [...prev, sourceId]);
+    setDecisions(prev => prev.filter((d: any) => d.source_id !== sourceId));
+  }, []);
+
+  const draftDecisionResponse = useCallback((decision: any) => {
+    const message = `Help me draft a response to this unresolved item:
+  Source: ${decision.source}
+  Issue: ${decision.summary}
+  Open for: ${decision.days_open} days
+  Suggested approach: ${decision.draft_recommendation}`;
+    chatPanelRef.current?.sendMessage(message);
+    handleArtifactChange('decision_queue', { decisions, total: decisionsTotal }, undefined);
+  }, [decisions, decisionsTotal, handleArtifactChange]);
+
+  // GitHub velocity state
+  const [githubData, setGithubData] = useState<any>(null);
+  const [githubSyncing, setGithubSyncing] = useState(false);
+
+  const fetchGithubData = useCallback(async () => {
+    try {
+      const res = await fetch('/api/integrations/github/insights');
+      if (!res.ok) return;
+      setGithubData(await res.json());
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    fetchGithubData();
+  }, [fetchGithubData]);
+
+  // Proactive alert bell state
+  const [bellAlerts, setBellAlerts] = useState<any[]>([]);
+  const [bellUnreadCount, setBellUnreadCount] = useState(0);
+
+  const fetchBellAlerts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/finance/proactive/alerts');
+      const data = await res.json();
+      setBellAlerts(data.alerts || []);
+      setBellUnreadCount(data.unread_count || 0);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    fetchBellAlerts();
+    const interval = setInterval(fetchBellAlerts, 90000);
+    return () => clearInterval(interval);
+  }, [fetchBellAlerts]);
 
   // Render the right panel content based on artifact type
   const renderArtifactPanel = () => {
@@ -346,6 +524,144 @@ export default function FinanceSpacePage() {
           />
         );
 
+      case "slack_insights":
+        return (
+          <SlackInsights
+            insights={slackData.insights}
+            unansweredCount={slackData.unanswered_count}
+            isConnected={slackData.connected}
+            isLoading={false}
+            lastSynced={slackData.last_synced}
+            isSyncing={slackSyncing}
+            onConnect={() => {
+              if (userId)
+                window.location.href = `/api/integrations/slack/connect?userId=${userId}`;
+            }}
+            onSync={async () => {
+              setSlackSyncing(true);
+              try {
+                await fetch('/api/integrations/slack/sync', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ userId }),
+                });
+                await fetchSlackData();
+              } catch {}
+              setSlackSyncing(false);
+            }}
+          />
+        );
+
+      case "time_audit":
+        return (
+          <TimeAudit
+            auditData={calendarData}
+            isLoading={false}
+            isSyncing={calendarSyncing}
+            onConnect={() => {
+              if (userId)
+                window.location.href = `/api/integrations/calendar/connect?userId=${userId}`;
+            }}
+            onSync={async () => {
+              setCalendarSyncing(true);
+              try {
+                await fetch('/api/integrations/calendar/sync', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ userId }),
+                });
+                await fetchCalendarData();
+              } catch {}
+              setCalendarSyncing(false);
+            }}
+            onSaveReflection={async (intended: string, actual: string) => {
+              try {
+                await fetch('/api/goals/reflections', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ intended, actual, userId }),
+                });
+                await fetchCalendarData();
+              } catch {}
+            }}
+          />
+        );
+
+      case "goal_setter":
+        return (
+          <GoalSetter
+            goals={goalsData}
+            currentQuarter={getCurrentQuarter()}
+            isLoading={goalsSaving}
+            onSave={async (goals: any[]) => {
+              setGoalsSaving(true);
+              try {
+                await fetch('/api/goals', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ goals, userId }),
+                });
+                await fetchGoals();
+              } catch {}
+              setGoalsSaving(false);
+            }}
+          />
+        );
+
+      case "workflow_hub":
+        return (
+          <WorkflowHub
+            analysis={hubAnalysis}
+            dataSourcesUsed={hubDataSources}
+            isLoading={false}
+            isAnalyzing={isAnalyzing}
+            lastAnalyzed={lastAnalyzed}
+            onRunAnalysis={runHubAnalysis}
+          />
+        );
+
+      case "github_velocity":
+        return (
+          <GitHubVelocity
+            metrics={githubData?.metrics || null}
+            insights={githubData?.insights || []}
+            velocityScore={githubData?.velocity_score}
+            isConnected={!!githubData?.connected}
+            isLoading={false}
+            lastSynced={githubData?.last_synced || null}
+            isSyncing={githubSyncing}
+            onConnect={() => {
+              if (userId)
+                window.location.href = `/api/integrations/github/connect?userId=${userId}`;
+            }}
+            onSync={async () => {
+              setGithubSyncing(true);
+              try {
+                await fetch('/api/integrations/github/sync', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ userId }),
+                });
+                await fetchGithubData();
+              } catch {}
+              setGithubSyncing(false);
+            }}
+          />
+        );
+
+      case "decision_queue":
+        return (
+          <DecisionQueue
+            decisions={decisions.filter((d: any) => !resolvedDecisions.includes(d.source_id))}
+            total={decisionsTotal}
+            isLoading={false}
+            isScanning={isScanning}
+            onScan={scanDecisions}
+            onResolve={resolveDecision}
+            onDraftRecommendation={draftDecisionResponse}
+          />
+        );
+
       default:
         return (
           <FinanceHomeView
@@ -389,6 +705,7 @@ export default function FinanceSpacePage() {
           ref={chatPanelRef}
           userId={userId}
           onArtifactChange={handleArtifactChange}
+          onTriggerHubAnalysis={runHubAnalysis}
         />
       </div>
 
@@ -407,15 +724,44 @@ export default function FinanceSpacePage() {
           position: "relative",
         }}
       >
-        {/* Settings gear */}
-        <button
-          type="button"
-          onClick={() => setSettingsOpen(true)}
-          className="absolute top-4 right-4 z-10 text-[var(--text-3)] hover:text-[var(--text-1)] transition-colors"
-          title="Finance Settings"
-        >
-          <Settings size={16} />
-        </button>
+        {/* Settings gear + Alert bell */}
+        <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
+          <ProactiveAlertBell
+            alerts={bellAlerts}
+            unreadCount={bellUnreadCount}
+            onDismiss={async (id) => {
+              await fetch('/api/finance/proactive/alerts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id, status: 'dismissed', userId }),
+              });
+              fetchBellAlerts();
+            }}
+            onMarkAllRead={async () => {
+              for (const alert of bellAlerts) {
+                await fetch('/api/finance/proactive/alerts', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ id: alert.id, status: 'read', userId }),
+                });
+              }
+              fetchBellAlerts();
+            }}
+            onInvestigate={(alert) => {
+              chatPanelRef.current?.sendMessage(
+                `Tell me more about this alert: ${alert.message}`
+              );
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="flex h-8 w-8 items-center justify-center rounded text-[var(--text-3)] hover:text-[var(--text-1)] transition-colors"
+            title="Finance Settings"
+          >
+            <Settings size={16} />
+          </button>
+        </div>
         {renderArtifactPanel()}
       </div>
 
@@ -475,6 +821,7 @@ export default function FinanceSpacePage() {
           setSettingsOpen(false);
         }}
         initialSettings={financeData.settings}
+        userId={userId}
       />
     </div>
   );
