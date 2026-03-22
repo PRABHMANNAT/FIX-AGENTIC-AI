@@ -2,7 +2,7 @@
 
 import { ArrowRight } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { createBrowserSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 import { cn, formatTime } from "@/lib/utils";
 import type {
@@ -89,7 +89,7 @@ function firstAssistantOptions(mode: OnboardMode) {
   return ["I run a gym", "I'm building an app", "I freelance", "I run a local business"];
 }
 
-export default function OnboardPage() {
+function OnboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const mode: OnboardMode = searchParams.get("mode") === "enhance" ? "enhance" : "build";
@@ -697,5 +697,13 @@ export default function OnboardPage() {
         )}
       </aside>
     </div>
+  );
+}
+
+export default function OnboardPage() {
+  return (
+    <Suspense fallback={<div className="onboard-shell flex items-center justify-center font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--text-2)]">Loading dashboard...</div>}>
+      <OnboardContent />
+    </Suspense>
   );
 }
